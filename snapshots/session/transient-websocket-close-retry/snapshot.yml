@@ -1,0 +1,9 @@
+version: 1
+scenario: transient-websocket-close-retry
+profile: headless
+composition: retry
+recording: authored
+header:
+  class: retry
+  systemPromptSource: text-turn
+  toolSchemasSource: text-turn

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
 import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
-import { createToolResultMessage, createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, createMessage } from '@deepseek-ai/dsh-llm'
+import { createToolResultMessage, createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, createMessage, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { AssistantMessage, AssistantMessageEvent, Usage } from '@earendil-works/pi-ai'
 import { transformMessages } from '@earendil-works/pi-ai/api/transform-messages'
@@ -948,6 +948,35 @@ describe('mapStopReason / mapUsage', () => {
     ['a leading 401', '401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}', 'AUTH'],
     ['a leading 429', '429 Too Many Requests: slow down', 'RATE_LIMIT'],
   ] as const)('classifies %s by its leading response status', (_label, errorMessage, code) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toEqual({ kind: 'error', failure: { message: errorMessage, code } })
+  })
+
+  it.each([
+    'WebSocket closed 1012',
+    'WebSocket closed 1012 Service Restart',
+    'WebSocket closed 1013',
+    'WebSocket closed 1013 Try Again Later',
+  ])('maps transient WebSocket close %j to a default-retryable failure', (errorMessage) => {
+    const reason = mapStopReason(assistant({ stopReason: 'error', errorMessage }))
+    expect(reason).toEqual({ kind: 'error', failure: { message: errorMessage, code: 'TRANSPORT' } })
+    const policy = resolveRetryPolicy(undefined, 'test provider')
+    if (policy.mode !== 'normal') throw new Error('expected the default normal retry policy')
+    if (reason.kind !== 'error') throw new Error('expected an error finish')
+    expect(policy.retryableCodes).toContain(reason.failure.code)
+  })
+
+  it.each([
+    ['WebSocket closed 1000', 'PI_AI_ERROR'],
+    ['WebSocket closed 1008 policy violation', 'PI_AI_ERROR'],
+    ['WebSocket closed 1009 message too big', 'PI_AI_ERROR'],
+    ['WebSocket closed 10120', 'PI_AI_ERROR'],
+    ['WebSocket closed 1012x', 'PI_AI_ERROR'],
+    ['WebSocket closed 11012', 'PI_AI_ERROR'],
+    ['HTTP 401: WebSocket closed 1012', 'AUTH'],
+    ['HTTP 403: WebSocket closed 1013', 'AUTH'],
+    ['HTTP 400: WebSocket closed 1012', 'INVALID_REQUEST'],
+  ] as const)('preserves non-transient classification for %j', (errorMessage, code) => {
     expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
       .toEqual({ kind: 'error', failure: { message: errorMessage, code } })
   })
