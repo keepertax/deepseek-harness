@@ -57,6 +57,7 @@ function classifyPiAiError(message: string): BuiltinLlmFailureCode {
   if (/\b400\b/.test(statusSource) || /invalid.?request/i.test(message)) return 'INVALID_REQUEST'
   if (/\b5\d\d\b/.test(statusSource)) return 'SERVER'
   if (/\btime(?:d)?\s*out\b|timeout/i.test(message)) return 'TIMEOUT'
+  if (/\bWebSocket closed\s+(?:1012|1013)\b/i.test(message)) return 'TRANSPORT'
   // A stream truncated before the provider's terminal event: each pi-ai provider
   // throws its own wording when the wire closes mid-response without a terminal
   // event (`… stream ended before message_stop`, `… before a terminal response
@@ -77,6 +78,7 @@ function classifyPiAiError(message: string): BuiltinLlmFailureCode {
 
 /**
  * Map a terminal pi-ai event to the harness finish reason.
+ * WebSocket close statuses 1012 and 1013 map to `TRANSPORT` failures.
  * @param message - the assistant message carried by the `done` or `error` event.
  * @param contextWindow - resolved catalog capacity for usage-based overflow detection.
  * @returns the mapped harness reason. Recognized error text, `stop` usage above
